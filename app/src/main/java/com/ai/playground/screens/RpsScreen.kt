@@ -17,7 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.ai.playground.network.*
+import com.ai.playground.logic.getRpsResult // <-- Import local logic
 import kotlinx.coroutines.launch
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -39,19 +39,14 @@ fun RpsScreen() {
     )
 
     fun play(move: String) {
-        scope.launch {
-            try {
-                val response = ApiClient.api.rps(RpsReq(move, mode))
-                userMove = response.user
-                aiMove = response.ai
-                result = when (response.winner) {
-                    "user" -> "You win! 🎉"
-                    "ai" -> "AI wins! 🤖"
-                    else -> "It's a draw! 😐"
-                }
-            } catch (e: Exception) {
-                result = "Error: ${e.message}"
-            }
+        // No coroutine needed, this is instant!
+        val response = getRpsResult(move)
+        userMove = response.user
+        aiMove = response.ai
+        result = when (response.winner) {
+            "user" -> "You win! 🎉"
+            "ai" -> "AI wins! 🤖"
+            else -> "It's a draw! 😐"
         }
     }
 

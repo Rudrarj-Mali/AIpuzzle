@@ -51,10 +51,12 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    
+    // ... other dependencies
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     // Navigation
     implementation(libs.androidx.navigation.compose)
-    
+    implementation("androidx.compose.material:material-icons-extended:1.6.8")
     // Network
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)

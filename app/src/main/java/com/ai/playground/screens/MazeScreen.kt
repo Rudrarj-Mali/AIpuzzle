@@ -26,9 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.ai.playground.network.*
+import com.ai.playground.logic.solveMazeWith // <-- Import local logic
+import kotlinx.coroutines.Dispatchers // <-- Import Coroutine utils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -38,7 +40,7 @@ fun MazeScreen() {
     val scope = rememberCoroutineScope()
     val rows = 10
     val cols = 10
-    
+
     // Initialize maze with borders
     var maze by remember {
         mutableStateOf(
@@ -49,19 +51,19 @@ fun MazeScreen() {
             }
         )
     }
-    
+
     val start = 1 to 1
     val end = rows - 2 to cols - 2
-    
+
     var path by remember { mutableStateOf(emptyList<Pair<Int, Int>>()) }
     var isSolving by remember { mutableStateOf(false) }
     var selectedAlgo by remember { mutableStateOf("astar") }
     val buttonScale by animateFloatAsState(if (isSolving) 0.95f else 1f)
 
     fun toggleWall(row: Int, col: Int) {
-        if ((row == start.first && col == start.second) || 
+        if ((row == start.first && col == start.second) ||
             (row == end.first && col == end.second)) return
-            
+
         val newMaze = maze.map { it.toMutableList() }
         newMaze[row][col] = if (newMaze[row][col] == 0) 1 else 0
         maze = newMaze
@@ -70,7 +72,7 @@ fun MazeScreen() {
 
     fun generateRandomMaze() {
         val newMaze = List(rows) { MutableList(cols) { 0 } }
-        
+
         // Add borders
         for (i in 0 until rows) {
             newMaze[i][0] = 1
@@ -80,7 +82,7 @@ fun MazeScreen() {
             newMaze[0][j] = 1
             newMaze[rows - 1][j] = 1
         }
-        
+
         // Add random walls (25% chance)
         for (i in 1 until rows - 1) {
             for (j in 1 until cols - 1) {
@@ -91,7 +93,7 @@ fun MazeScreen() {
                 }
             }
         }
-        
+
         maze = newMaze
         path = emptyList()
     }
@@ -107,28 +109,27 @@ fun MazeScreen() {
 
     fun solveMaze() {
         if (isSolving) return
-        
+
         scope.launch {
             isSolving = true
-            try {
-                val response = ApiClient.api.maze(
-                    MazeReq(
-                        maze = maze,
-                        start = listOf(start.first, start.second),
-                        end = listOf(end.first, end.second),
-                        algo = selectedAlgo
-                    )
+            path = emptyList() // Clear old path
+
+            // Run solving on a background thread
+            val resultPath = withContext(Dispatchers.Default) {
+                solveMazeWith(
+                    maze = maze,
+                    start = listOf(start.first, start.second),
+                    end = listOf(end.first, end.second),
+                    algorithm = selectedAlgo
                 )
-                
-                if (response.path.isNotEmpty()) {
-                    val steps = response.path.map { it[0] to it[1] }
-                    animateSolution(steps)
-                }
-            } catch (e: Exception) {
-                // Handle error
-            } finally {
-                isSolving = false
             }
+
+            if (resultPath != null && resultPath.isNotEmpty()) {
+                val steps = resultPath.map { it[0] to it[1] }
+                animateSolution(steps)
+            }
+
+            isSolving = false
         }
     }
 
@@ -148,7 +149,7 @@ fun MazeScreen() {
                     ) {
                         Icon(Icons.Default.Refresh, "Randomize")
                     }
-                    
+
                     Button(
                         onClick = { solveMaze() },
                         enabled = !isSolving,
@@ -176,7 +177,7 @@ fun MazeScreen() {
                 listOf("BFS" to "bfs", "DFS" to "dfs", "A*" to "astar").forEach { (name, algo) ->
                     FilterChip(
                         selected = selectedAlgo == algo,
-                        onClick = { 
+                        onClick = {
                             if (!isSolving) {
                                 selectedAlgo = algo
                                 path = emptyList()
@@ -187,7 +188,7 @@ fun MazeScreen() {
                     )
                 }
             }
-            
+
             // Maze grid
             Box(
                 modifier = Modifier
@@ -209,7 +210,7 @@ fun MazeScreen() {
                                 val isPath = path.contains(row to col)
                                 val isStart = row == start.first && col == start.second
                                 val isEnd = row == end.first && col == end.second
-                                
+
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
@@ -233,7 +234,7 @@ fun MazeScreen() {
                     }
                 }
             }
-            
+
             // Legend
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -244,7 +245,7 @@ fun MazeScreen() {
                 LegendItem(color = Color.Blue.copy(alpha = 0.3f), text = "Path")
                 LegendItem(color = Color.Black, text = "Wall")
             }
-            
+
             // Instructions
             Text(
                 text = "Tap to toggle walls. Click Solve to find the path.",

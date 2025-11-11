@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import random
 import heapq
+from typing import List, Tuple, Any
 
 app = FastAPI()
 
@@ -20,8 +21,14 @@ app.add_middleware(
 # ========================
 class RPSRequest(BaseModel):
     user_move: str
+    mode: str  # We accept the mode, even if we don't use it
 
-@app.post("/rps/")
+class RPSResponse(BaseModel):
+    user: str
+    ai: str
+    winner: str
+
+@app.post("/rps/", response_model=RPSResponse)
 def rps_ai(request: RPSRequest):
     moves = ["rock", "paper", "scissors"]
     ai_move = random.choice(moves)
@@ -36,16 +43,27 @@ def rps_ai(request: RPSRequest):
     else:
         result = "lose"
 
-    return {"ai_move": ai_move, "result": result}
+    # Map our internal result to the response model your app expects
+    winner_map = {
+        "win": "user",
+        "lose": "ai",
+        "draw": "draw"
+    }
+
+    return RPSResponse(user=user, ai=ai_move, winner=winner_map[result])
 
 
 # ========================
 # Tic Tac Toe AI
 # ========================
 class TicTacToeRequest(BaseModel):
-    board: list
+    board: List[str]  # App sends a flat list of 9
     player: str
 
+class TicTacToeResponse(BaseModel):
+    best_move: int  # App expects a single index (0-8)
+
+# --- (Original Minimax Logic) ---
 def minimax(board, depth, is_maximizing, player, opponent):
     winner = check_winner(board)
     if winner == player:
@@ -88,62 +106,84 @@ def check_winner(board):
     if board[0][2] != "" and board[0][2] == board[1][1] == board[2][0]:
         return board[0][2]
     return None
+# --- (End Original Logic) ---
 
-@app.post("/tictactoe/")
+@app.post("/tictactoe/", response_model=TicTacToeResponse)
 def tictactoe_ai(request: TicTacToeRequest):
-    board = request.board
+    # Convert flat board (from app) to 3x3 (for minimax)
+    flat_board = request.board
+    board_3x3 = [
+        [flat_board[0], flat_board[1], flat_board[2]],
+        [flat_board[3], flat_board[4], flat_board[5]],
+        [flat_board[6], flat_board[7], flat_board[8]]
+    ]
+
     player = request.player
     opponent = "O" if player == "X" else "X"
     best_score = -float("inf")
-    best_move = None
+    best_move_tuple = None
 
     for i in range(3):
         for j in range(3):
-            if board[i][j] == "":
-                board[i][j] = player
-                score = minimax(board, 0, False, player, opponent)
-                board[i][j] = ""
+            if board_3x3[i][j] == "":
+                board_3x3[i][j] = player
+                score = minimax(board_3x3, 0, False, player, opponent)
+                board_3x3[i][j] = ""
                 if score > best_score:
                     best_score = score
-                    best_move = (i, j)
+                    best_move_tuple = (i, j)
 
-    return {"best_move": best_move}
+    # Convert (i, j) tuple (from minimax) back to flat index (for app)
+    best_move_index = best_move_tuple[0] * 3 + best_move_tuple[1]
+
+    return TicTacToeResponse(best_move=best_move_index)
 
 
 # ========================
 # Maze Solver AI (BFS, DFS, A*)
 # ========================
 class MazeRequest(BaseModel):
-    maze: list
-    start: tuple
-    end: tuple
+    maze: List[List[int]]
+    start: List[int]  # App sends [row, col]
+    end: List[int]    # App sends [row, col]
     algorithm: str
 
+class MazeResponse(BaseModel):
+    path: List[List[int]] # App expects list of [row, col]
+
+# --- (Modified Search Algos) ---
+# Modified to return list[list[int]] instead of list[tuple[int, int]]
 def bfs(maze, start, end):
-    queue = [(start, [start])]
-    visited = set([start])
+    queue = [(tuple(start), [start])]
+    visited = set([tuple(start)])
     while queue:
         (x, y), path = queue.pop(0)
-        if (x, y) == end:
+        if (x, y) == tuple(end):
             return path
         for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
             nx, ny = x + dx, y + dy
             if 0 <= nx < len(maze) and 0 <= ny < len(maze[0]) and maze[nx][ny] == 0 and (nx, ny) not in visited:
-                queue.append(((nx, ny), path + [(nx, ny)]))
+                queue.append(((nx, ny), path + [[nx, ny]])) # Return list
                 visited.add((nx, ny))
     return None
 
 def dfs(maze, start, end, visited=None, path=None):
     if visited is None: visited = set()
     if path is None: path = []
-    x, y = start
-    if start == end:
+
+    start_tuple = tuple(start)
+    end_tuple = tuple(end)
+
+    x, y = start_tuple
+    if start_tuple == end_tuple:
         return path + [start]
-    visited.add(start)
+
+    visited.add(start_tuple)
+
     for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
         nx, ny = x + dx, y + dy
         if 0 <= nx < len(maze) and 0 <= ny < len(maze[0]) and maze[nx][ny] == 0 and (nx, ny) not in visited:
-            res = dfs(maze, (nx, ny), end, visited, path + [start])
+            res = dfs(maze, [nx, ny], end, visited, path + [start]) # Return list
             if res:
                 return res
     return None
@@ -152,11 +192,13 @@ def heuristic(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 def astar(maze, start, end):
-    heap = [(0, start, [start])]
+    start_tuple = tuple(start)
+    end_tuple = tuple(end)
+    heap = [(0, start_tuple, [start])] # Store path as list
     visited = set()
     while heap:
         cost, (x, y), path = heapq.heappop(heap)
-        if (x, y) == end:
+        if (x, y) == end_tuple:
             return path
         if (x, y) in visited:
             continue
@@ -164,30 +206,36 @@ def astar(maze, start, end):
         for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
             nx, ny = x + dx, y + dy
             if 0 <= nx < len(maze) and 0 <= ny < len(maze[0]) and maze[nx][ny] == 0:
-                new_cost = cost + 1 + heuristic((nx, ny), end)
-                heapq.heappush(heap, (new_cost, (nx, ny), path + [(nx, ny)]))
+                new_cost = cost + 1 + heuristic((nx, ny), end_tuple)
+                heapq.heappush(heap, (new_cost, (nx, ny), path + [[nx, ny]])) # Return list
     return None
+# --- (End Modified Algos) ---
 
-@app.post("/maze/")
+@app.post("/maze/", response_model=MazeResponse)
 def maze_ai(request: MazeRequest):
+    path = None
     if request.algorithm == "bfs":
-        path = bfs(request.maze, tuple(request.start), tuple(request.end))
+        path = bfs(request.maze, request.start, request.end)
     elif request.algorithm == "dfs":
-        path = dfs(request.maze, tuple(request.start), tuple(request.end))
+        path = dfs(request.maze, request.start, request.end)
     elif request.algorithm == "astar":
-        path = astar(request.maze, tuple(request.start), tuple(request.end))
+        path = astar(request.maze, request.start, request.end)
     else:
         return {"error": "Invalid algorithm"}
-    return {"path": path}
+
+    return MazeResponse(path=path or [])
 
 
 # ========================
 # 8 Puzzle Solver (A*)
 # ========================
 class EightPuzzleRequest(BaseModel):
-    start: list
-    goal: list
+    state: List[int] # App sends a flat list of 9
 
+class EightPuzzleResponse(BaseModel):
+    states: List[List[int]] # App expects a list of flat-list states
+
+# --- (Original 8-Puzzle Logic) ---
 def manhattan_distance(state, goal):
     dist = 0
     for i in range(3):
@@ -229,11 +277,34 @@ def eight_puzzle_solver(start, goal):
                     (cost + 1 + manhattan_distance(neighbor, goal), cost + 1, neighbor, path + [neighbor])
                 )
     return None
+# --- (End Original Logic) ---
 
-@app.post("/eight/")
+@app.post("/eight/", response_model=EightPuzzleResponse)
 def eight_puzzle_ai(request: EightPuzzleRequest):
-    path = eight_puzzle_solver(request.start, request.goal)
-    return {"solution": path}
+    # Convert flat list from app to 3x3 grid
+    flat_state = request.state
+    start_3x3 = [
+        [flat_state[0], flat_state[1], flat_state[2]],
+        [flat_state[3], flat_state[4], flat_state[5]],
+        [flat_state[6], flat_state[7], flat_state[8]]
+    ]
+
+    # Define the goal state
+    goal_3x3 = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 0]
+    ]
+
+    path_3x3 = eight_puzzle_solver(start_3x3, goal_3x3)
+
+    # Convert list of 3x3 grids (from solver) to list of flat lists (for app)
+    if path_3x3:
+        solution_flat_lists = [[cell for row in state for cell in row] for state in path_3x3]
+    else:
+        solution_flat_lists = []
+
+    return EightPuzzleResponse(states=solution_flat_lists)
 
 
 # ========================

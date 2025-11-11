@@ -16,9 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.ai.playground.network.*
+import com.ai.playground.logic.solveEightPuzzle // <-- Import local logic
+import kotlinx.coroutines.Dispatchers // <-- Import Coroutine utils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,13 +61,13 @@ fun EightPuzzleScreen() {
 
     fun moveTile(index: Int) {
         if (isSolving) return
-        
+
         val zeroIndex = state.indexOf(0)
         val zeroRow = zeroIndex / 3
         val zeroCol = zeroIndex % 3
         val tileRow = index / 3
         val tileCol = index % 3
-        
+
         // Check if the tile is adjacent to the empty space
         if ((tileRow == zeroRow && (tileCol == zeroCol - 1 || tileCol == zeroCol + 1)) ||
             (tileCol == zeroCol && (tileRow == zeroRow - 1 || tileRow == zeroRow + 1))
@@ -75,7 +77,7 @@ fun EightPuzzleScreen() {
             newState[index] = 0
             state = newState
             moveCount++
-            
+
             // Check if puzzle is solved
             if (state.take(8) == (1..8).toList() && state[8] == 0) {
                 // Puzzle solved
@@ -85,29 +87,29 @@ fun EightPuzzleScreen() {
 
     suspend fun solvePuzzle() {
         if (isSolving) return
-        
+
         isSolving = true
         showSolution = false
-        
-        try {
-            val response = ApiClient.api.eight(EightReq(state))
-            if (response.states.isNotEmpty()) {
-                solution = response.states
-                showSolution = true
-                currentStep = 0
-                
-                // Animate the solution
-                for (step in 0 until solution.size) {
-                    state = solution[step]
-                    currentStep = step
-                    delay(300) // Animation speed
-                }
-            }
-        } catch (e: Exception) {
-            // Handle error
-        } finally {
-            isSolving = false
+
+        // Run solving on a background thread
+        val solutionPath = withContext(Dispatchers.Default) {
+            solveEightPuzzle(state) // Pass the flat list directly
         }
+
+        if (solutionPath.isNotEmpty()) {
+            solution = solutionPath
+            showSolution = true
+            currentStep = 0
+
+            // Animate the solution
+            for (step in solution.indices) {
+                state = solution[step]
+                currentStep = step
+                delay(300) // Animation speed
+            }
+        }
+
+        isSolving = false
     }
 
     Scaffold(
@@ -156,7 +158,7 @@ fun EightPuzzleScreen() {
                                         .fillMaxHeight()
                                         .padding(4.dp)
                                         .background(
-                                            if (number == 0) Color.Transparent 
+                                            if (number == 0) Color.Transparent
                                             else MaterialTheme.colorScheme.primaryContainer,
                                             RoundedCornerShape(4.dp)
                                         )
@@ -190,7 +192,7 @@ fun EightPuzzleScreen() {
                 ) {
                     Text(if (isSolving) "Solving..." else "Solve with A*")
                 }
-                
+
                 Text(
                     text = "Moves: $moveCount",
                     style = MaterialTheme.typography.titleMedium,
